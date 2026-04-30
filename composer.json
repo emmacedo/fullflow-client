@@ -1,0 +1,46 @@
+{
+    "name": "kicol/fullflow-client",
+    "description": "Cliente PHP/Laravel para integrar SaaS Kicol com o FullFlow (Módulo de Assinaturas).",
+    "type": "library",
+    "license": "proprietary",
+    "authors": [
+        { "name": "Eduardo Macedo", "email": "eduardo.macedo@kicol.com.br" }
+    ],
+    "require": {
+        "php": "^8.1",
+        "illuminate/support": "^10.0|^11.0",
+        "illuminate/http": "^10.0|^11.0",
+        "illuminate/database": "^10.0|^11.0",
+        "illuminate/console": "^10.0|^11.0",
+        "illuminate/events": "^10.0|^11.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0",
+        "orchestra/testbench": "^8.0|^9.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Kicol\\FullFlow\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Kicol\\FullFlow\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Kicol\\FullFlow\\FullFlowServiceProvider"
+            ],
+            "aliases": {
+                "FullFlow": "Kicol\\FullFlow\\Facades\\FullFlow"
+            }
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    }
+}
