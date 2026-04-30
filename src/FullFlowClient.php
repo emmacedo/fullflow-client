@@ -51,6 +51,47 @@ class FullFlowClient
     }
 
     /**
+     * Upgrade — vigora imediato, gera cobrança avulsa proporcional.
+     */
+    public function upgradeSubscription(string $uuid, string $planCode, ?string $motivo = null): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/upgrade", array_filter([
+            'plan_code' => $planCode,
+            'motivo' => $motivo,
+        ]));
+    }
+
+    /**
+     * Downgrade — vigora no próximo ciclo (Trial troca imediato), gera credit.
+     */
+    public function downgradeSubscription(string $uuid, string $planCode, ?string $motivo = null): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/downgrade", array_filter([
+            'plan_code' => $planCode,
+            'motivo' => $motivo,
+        ]));
+    }
+
+    /**
+     * Lista cobranças de uma assinatura.
+     *
+     * @param string $status 'em_aberto' (default), 'pagas' ou 'todas'
+     */
+    public function listCharges(string $uuid, string $status = 'em_aberto'): array
+    {
+        return $this->call('get', "/assinaturas/{$uuid}/cobrancas", ['status' => $status]);
+    }
+
+    /**
+     * Lista cobranças de todas as assinaturas de um cliente (no produto autenticado).
+     */
+    public function listClientCharges(string $documento, string $status = 'em_aberto'): array
+    {
+        $documento = preg_replace('/\D/', '', $documento);
+        return $this->call('get', "/clientes/{$documento}/cobrancas", ['status' => $status]);
+    }
+
+    /**
      * Lista assinaturas de um cliente (apenas do produto autenticado).
      */
     public function listClientSubscriptions(string $documento): array
