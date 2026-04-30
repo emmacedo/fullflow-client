@@ -2,8 +2,10 @@
 
 namespace Kicol\FullFlow;
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use Kicol\FullFlow\Console\Commands\FullFlowCatalogSyncCommand;
 use Kicol\FullFlow\Console\Commands\FullFlowReconcileCommand;
 use Kicol\FullFlow\Middleware\EnsureSubscriptionActive;
 use Kicol\FullFlow\Webhook\IdempotencyChecker;
@@ -37,14 +39,15 @@ class FullFlowServiceProvider extends ServiceProvider
             __DIR__ . '/../config/fullflow.php' => config_path('fullflow.php'),
         ], 'fullflow-config');
 
+        // Migration de fullflow_subscriptions é PUBLICÁVEL pois cada SaaS
+        // adapta a FK de tenant (user_id, store_owner_id, etc.).
         $this->publishes([
-            __DIR__ . '/../database/migrations' => database_path('migrations'),
+            __DIR__ . '/../database/stubs/migrations' => database_path('migrations'),
         ], 'fullflow-migrations');
 
-        // Migrations NÃO são auto-carregadas — cada SaaS publica via:
-        //   php artisan vendor:publish --tag=fullflow-migrations
-        // ou cria sua própria migration adaptada ao seu modelo de tenant
-        // (ex: store_owner_id no eBookView).
+        // Migrations do CATÁLOGO (modules, plans, plan_modules) são auto-loaded —
+        // não variam entre SaaS, então rodam direto com `php artisan migrate`.
+        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
 
         $router = $this->app->make(Router::class);
         $router->aliasMiddleware('fullflow.subscription.active', EnsureSubscriptionActive::class);
@@ -52,7 +55,23 @@ class FullFlowServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 FullFlowReconcileCommand::class,
+                FullFlowCatalogSyncCommand::class,
             ]);
+
+            // Schedule do catalog-sync — opt-in via config (default 03:00).
+            // Para desligar, defina FULLFLOW_CATALOG_SYNC_AT=null no .env.
+            $this->app->booted(function () {
+                $cron = config('fullflow.catalog_sync_at');
+                if (! $cron) {
+                    return;
+                }
+                /** @var Schedule $schedule */
+                $schedule = $this->app->make(Schedule::class);
+                $schedule->command('fullflow:catalog-sync')
+                    ->dailyAt($cron)
+                    ->withoutOverlapping()
+                    ->name('fullflow-catalog-sync');
+            });
         }
     }
 }

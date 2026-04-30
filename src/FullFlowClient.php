@@ -59,6 +59,101 @@ class FullFlowClient
         return $this->call('get', "/clientes/{$documento}/assinaturas");
     }
 
+    /**
+     * Declara/atualiza módulos do produto no FullFlow (idempotente).
+     *
+     * @param array $modules Lista de [slug, label, tipo, descricao?, visivel_ao_cliente?]
+     * @return array {criados[], atualizados[], arquivados[], total}
+     */
+    public function syncModules(array $modules): array
+    {
+        return $this->call('post', '/modulos/sync', ['modulos' => $modules]);
+    }
+
+    /**
+     * Lista planos visíveis ao cliente do produto autenticado.
+     * Retorna o array bruto da API; use FullFlow::pullCatalog() para também
+     * persistir nas tabelas locais.
+     */
+    public function listPlans(): array
+    {
+        return $this->call('get', '/planos');
+    }
+
+    /**
+     * Sincroniza planos+módulos no banco LOCAL (tabelas fullflow_plans,
+     * fullflow_modules, fullflow_plan_modules). Idempotente.
+     */
+    public function pullCatalog(): array
+    {
+        $payload = $this->listPlans();
+        $planos = $payload['planos'] ?? [];
+
+        $now = now();
+        $modulesByCode = [];
+        $modulesById = [];
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($planos, $now, &$modulesByCode, &$modulesById) {
+            // 1) Coletar todos os módulos únicos por slug
+            $allModules = collect($planos)
+                ->flatMap(fn ($p) => $p['modulos'] ?? [])
+                ->unique('slug')
+                ->values();
+
+            foreach ($allModules as $m) {
+                $module = \Kicol\FullFlow\Models\FullFlowModule::updateOrCreate(
+                    ['slug' => $m['slug']],
+                    [
+                        'label' => $m['label'],
+                        'description' => $m['description'] ?? null,
+                        'type' => $m['tipo'],
+                        'visible_to_client' => true,
+                        'synced_at' => $now,
+                    ]
+                );
+                $modulesByCode[$m['slug']] = $module->id;
+            }
+
+            // 2) Upsert dos planos e sincronizar pivots
+            $planosKept = [];
+            foreach ($planos as $p) {
+                $plan = \Kicol\FullFlow\Models\FullFlowPlan::updateOrCreate(
+                    ['code' => $p['code']],
+                    [
+                        'name' => $p['name'],
+                        'description' => $p['description'] ?? null,
+                        'billing_cycle' => $p['billing_cycle'],
+                        'amount' => $p['amount'],
+                        'trial_days' => $p['trial_days'] ?? 0,
+                        'sort_order' => $p['sort_order'] ?? 0,
+                        'synced_at' => $now,
+                    ]
+                );
+                $planosKept[] = $plan->code;
+
+                $sync = [];
+                foreach ($p['modulos'] ?? [] as $m) {
+                    if (! isset($modulesByCode[$m['slug']])) {
+                        continue;
+                    }
+                    $sync[$modulesByCode[$m['slug']]] = ['quota_value' => $m['quota'] ?? null];
+                }
+                $plan->modules()->sync($sync);
+            }
+
+            // 3) Remover planos que não vieram (sumiram do FullFlow)
+            \Kicol\FullFlow\Models\FullFlowPlan::query()
+                ->whereNotIn('code', $planosKept)
+                ->delete();
+        });
+
+        return [
+            'planos' => count($planos),
+            'modulos' => count($modulesByCode),
+            'synced_at' => $now->toIso8601String(),
+        ];
+    }
+
     protected function http(): PendingRequest
     {
         return Http::withHeaders([
