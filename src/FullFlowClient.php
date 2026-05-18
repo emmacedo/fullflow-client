@@ -165,6 +165,7 @@ class FullFlowClient
                         'description' => $p['description'] ?? null,
                         'billing_cycle' => $p['billing_cycle'],
                         'amount' => $p['amount'],
+                        'is_custom_pricing' => $p['is_custom_pricing'] ?? false,
                         'trial_days' => $p['trial_days'] ?? 0,
                         'sort_order' => $p['sort_order'] ?? 0,
                         'synced_at' => $now,

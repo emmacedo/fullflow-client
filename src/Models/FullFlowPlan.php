@@ -11,11 +11,12 @@ class FullFlowPlan extends Model
 
     protected $fillable = [
         'code', 'name', 'description', 'billing_cycle', 'amount',
-        'trial_days', 'sort_order', 'synced_at',
+        'is_custom_pricing', 'trial_days', 'sort_order', 'synced_at',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'is_custom_pricing' => 'boolean',
         'trial_days' => 'integer',
         'sort_order' => 'integer',
         'synced_at' => 'datetime',
