@@ -122,6 +122,36 @@ class FullFlowClient
     }
 
     /**
+     * Lista pacotes excedentes (add-ons) disponíveis para um plano.
+     */
+    public function listAddons(string $planCode): array
+    {
+        return $this->call('get', '/addons', ['plan_code' => $planCode]);
+    }
+
+    /**
+     * Inicia compra de add-on (gera cobrança PIX).
+     *
+     * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, pix}
+     */
+    public function purchaseAddon(string $subscriptionCode, string $addonCode, int $quantity = 1): array
+    {
+        return $this->call('post', '/addons/comprar', [
+            'subscription_code' => $subscriptionCode,
+            'addon_code' => $addonCode,
+            'quantity' => $quantity,
+        ]);
+    }
+
+    /**
+     * Consulta status de uma compra de add-on.
+     */
+    public function getAddonPurchase(string $purchaseId): array
+    {
+        return $this->call('get', "/addons/compra/{$purchaseId}");
+    }
+
+    /**
      * Sincroniza planos+módulos no banco LOCAL (tabelas fullflow_plans,
      * fullflow_modules, fullflow_plan_modules). Idempotente.
      */
