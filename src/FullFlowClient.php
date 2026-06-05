@@ -36,6 +36,28 @@ class FullFlowClient
         return $this->call('get', "/assinaturas/{$uuid}");
     }
 
+    /**
+     * Busca assinatura pela referência externa (do produto autenticado).
+     * Lança SubscriptionNotFoundException se não existir.
+     *
+     * O endpoint responde no formato do SubscriptionResource ('id'), mas o
+     * create responde 'assinatura_id' — o onboarding reaproveita
+     * 'assinatura_id' após um 409, então normalizamos aqui para o consumidor
+     * ler o MESMO nome nos dois caminhos.
+     *
+     * @param string $reference Ex: 'kicol_customer_13' ou 'kicol_store_5'
+     */
+    public function getSubscriptionByReference(string $reference): array
+    {
+        $data = $this->call('get', '/assinaturas', ['referencia_externa' => $reference]);
+
+        if (! isset($data['assinatura_id']) && isset($data['id'])) {
+            $data['assinatura_id'] = $data['id'];
+        }
+
+        return $data;
+    }
+
     public function cancelSubscription(string $uuid, ?string $motivo = null): array
     {
         return $this->call('post', "/assinaturas/{$uuid}/cancelar", array_filter([
@@ -130,16 +152,18 @@ class FullFlowClient
     }
 
     /**
-     * Inicia compra de add-on (gera cobrança PIX).
+     * Inicia compra de add-on.
      *
-     * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, pix}
+     * @param string $paymentMethod Hoje só 'pix' (default); valor inválido → 422.
+     * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, payment_method, pix}
      */
-    public function purchaseAddon(string $subscriptionCode, string $addonCode, int $quantity = 1): array
+    public function purchaseAddon(string $subscriptionCode, string $addonCode, int $quantity = 1, string $paymentMethod = 'pix'): array
     {
         return $this->call('post', '/addons/comprar', [
             'subscription_code' => $subscriptionCode,
             'addon_code' => $addonCode,
             'quantity' => $quantity,
+            'payment_method' => $paymentMethod,
         ]);
     }
 
@@ -249,7 +273,9 @@ class FullFlowClient
 
         $body = $response->json() ?: [];
         $codigo = $body['codigo'] ?? null;
-        $mensagem = $body['mensagem'] ?? $response->body();
+        // 'mensagem' = envelope de erro do FullFlow; 'message' = formato padrão
+        // do Laravel (422 de FormRequest vem assim).
+        $mensagem = $body['mensagem'] ?? $body['message'] ?? $response->body();
 
         match (true) {
             $response->status() === 401 => throw new ApiKeyException($mensagem),
@@ -259,6 +285,8 @@ class FullFlowClient
             $response->status() === 409 && $codigo === 'transicao_invalida'
                 => throw new InvalidTransitionException($mensagem),
             $response->status() === 400 => throw new InvalidPayloadException($mensagem, $body['detalhes'] ?? []),
+            // 422 = validação Laravel (FormRequest): errors é dict campo→mensagens.
+            $response->status() === 422 => throw new InvalidPayloadException($mensagem, $body['errors'] ?? $body['detalhes'] ?? []),
             default => throw new FullFlowException("FullFlow API error ({$response->status()}): {$mensagem}"),
         };
     }
