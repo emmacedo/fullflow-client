@@ -11,7 +11,8 @@ class FullFlowPlan extends Model
 
     protected $fillable = [
         'code', 'name', 'description', 'billing_cycle', 'amount',
-        'is_custom_pricing', 'visible_to_client', 'trial_days', 'sort_order', 'synced_at',
+        'is_custom_pricing', 'visible_to_client', 'trial_days', 'sort_order',
+        'plan_version', 'active', 'synced_at',
     ];
 
     protected $casts = [
@@ -20,6 +21,8 @@ class FullFlowPlan extends Model
         'visible_to_client' => 'boolean',
         'trial_days' => 'integer',
         'sort_order' => 'integer',
+        'plan_version' => 'integer',
+        'active' => 'boolean',
         'synced_at' => 'datetime',
     ];
 

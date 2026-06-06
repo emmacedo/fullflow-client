@@ -134,6 +134,18 @@ class FullFlowClient
     }
 
     /**
+     * Push do catálogo declarativo completo no contrato 3.3 (EN):
+     * {modules[], features[], module_features[]}. Usado pelo catalog-sync
+     * v0.8 quando o catálogo vive nas tabelas locais (CL-8).
+     *
+     * @return array {criados[], atualizados[], arquivados[], total}
+     */
+    public function syncCatalog(array $catalog): array
+    {
+        return $this->call('post', '/modulos/sync', $catalog);
+    }
+
+    /**
      * Lista planos visíveis ao cliente do produto autenticado.
      * Retorna o array bruto da API; use FullFlow::pullCatalog() para também
      * persistir nas tabelas locais.
@@ -223,6 +235,8 @@ class FullFlowClient
                         'visible_to_client' => $p['visible_to_client'] ?? true,
                         'trial_days' => $p['trial_days'] ?? 0,
                         'sort_order' => $p['sort_order'] ?? 0,
+                        'plan_version' => $p['plan_version'] ?? 0,
+                        'active' => true,
                         'synced_at' => $now,
                     ]
                 );
@@ -236,12 +250,19 @@ class FullFlowClient
                     $sync[$modulesByCode[$m['slug']]] = ['quota_value' => $m['quota'] ?? null];
                 }
                 $plan->modules()->sync($sync);
+
+                // Espelho de features (v0.8): o GET retorna superset
+                // (key/label/unit/period/quota) — o parser usa SÓ key+quota,
+                // mesmo contrato do webhook plan.updated (nota da Etapa 3).
+                $this->syncPlanFeaturesMirror($plan, $p['features'] ?? []);
             }
 
-            // 3) Remover planos que não vieram (sumiram do FullFlow)
+            // 3) Planos que não vieram sumiram do GET (active=true no
+            // FullFlow) → marca inativo em vez de deletar (reconcile 4.10):
+            // preserva histórico para assinaturas antigas.
             \Kicol\FullFlow\Models\FullFlowPlan::query()
                 ->whereNotIn('code', $planosKept)
-                ->delete();
+                ->update(['active' => false, 'synced_at' => $now]);
         });
 
         return [
@@ -249,6 +270,46 @@ class FullFlowClient
             'modulos' => count($modulesByCode),
             'synced_at' => $now->toIso8601String(),
         ];
+    }
+
+    /**
+     * Sincroniza o espelho fullflow_plan_features (plan_id + feature_id →
+     * features.key — DDL do catálogo 3.2) a partir da lista de features do
+     * GET/webhook. Ignora campos extras (label/unit/period); key desconhecida
+     * no catálogo local é pulada com warning (features é autoridade do dev).
+     * No-op quando as tabelas ainda não existem (janela pré-F3).
+     */
+    protected function syncPlanFeaturesMirror(\Kicol\FullFlow\Models\FullFlowPlan $plan, array $features): void
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('fullflow_plan_features')
+            || ! \Illuminate\Support\Facades\Schema::hasTable('features')) {
+            return;
+        }
+
+        $rows = [];
+        foreach ($features as $f) {
+            $key = (string) ($f['key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+
+            $featureId = \Illuminate\Support\Facades\DB::table('features')->where('key', $key)->value('id');
+            if ($featureId === null) {
+                \Illuminate\Support\Facades\Log::warning('FullFlow pullCatalog: feature_key desconhecida no catálogo local — pivot pulado.', [
+                    'plan_code' => $plan->code,
+                    'feature_key' => $key,
+                ]);
+
+                continue;
+            }
+
+            $rows[] = ['plan_id' => $plan->id, 'feature_id' => $featureId, 'quota' => $f['quota'] ?? null];
+        }
+
+        \Illuminate\Support\Facades\DB::table('fullflow_plan_features')->where('plan_id', $plan->id)->delete();
+        if ($rows !== []) {
+            \Illuminate\Support\Facades\DB::table('fullflow_plan_features')->insert($rows);
+        }
     }
 
     protected function http(): PendingRequest

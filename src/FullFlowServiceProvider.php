@@ -5,6 +5,7 @@ namespace Kicol\FullFlow;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use Kicol\FullFlow\Console\Commands\CatalogReconcileCommand;
 use Kicol\FullFlow\Console\Commands\FullFlowCatalogSyncCommand;
 use Kicol\FullFlow\Console\Commands\FullFlowReconcileCommand;
 use Kicol\FullFlow\Middleware\EnsureSubscriptionActive;
@@ -27,7 +28,10 @@ class FullFlowServiceProvider extends ServiceProvider
 
         $this->app->bind(SignatureValidator::class);
         $this->app->bind(IdempotencyChecker::class, function () {
-            return new IdempotencyChecker((int) config('fullflow.idempotency_ttl_hours', 24));
+            return new IdempotencyChecker(
+                (int) config('fullflow.idempotency_ttl_hours', 24),
+                (int) config('fullflow.idempotency_stale_minutes', 10),
+            );
         });
 
         $this->app->alias(FullFlowClient::class, 'fullflow.client');
@@ -56,10 +60,13 @@ class FullFlowServiceProvider extends ServiceProvider
             $this->commands([
                 FullFlowReconcileCommand::class,
                 FullFlowCatalogSyncCommand::class,
+                CatalogReconcileCommand::class,
             ]);
 
             // Schedule do catalog-sync — opt-in via config (default 03:00).
             // Para desligar, defina FULLFLOW_CATALOG_SYNC_AT=null no .env.
+            // (Descontinuado como pull rotineiro na F9 — sync 4.10: setar
+            // null e ativar o catalog-reconcile semanal abaixo.)
             $this->app->booted(function () {
                 $cron = config('fullflow.catalog_sync_at');
                 if (! $cron) {
@@ -71,6 +78,22 @@ class FullFlowServiceProvider extends ServiceProvider
                     ->dailyAt($cron)
                     ->withoutOverlapping()
                     ->name('fullflow-catalog-sync');
+            });
+
+            // Reconciliação semanal do espelho de planos (sync 4.10) — rede
+            // de segurança do webhook plan.updated. Sábado por padrão;
+            // horário via FULLFLOW_RECONCILE_AT (null desliga).
+            $this->app->booted(function () {
+                $at = config('fullflow.catalog_reconcile_at');
+                if (! $at) {
+                    return;
+                }
+                /** @var Schedule $schedule */
+                $schedule = $this->app->make(Schedule::class);
+                $schedule->command('fullflow:catalog-reconcile')
+                    ->weeklyOn(6, $at)
+                    ->withoutOverlapping()
+                    ->name('fullflow-catalog-reconcile');
             });
         }
     }

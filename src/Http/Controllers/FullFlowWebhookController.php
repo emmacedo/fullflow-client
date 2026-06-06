@@ -16,8 +16,10 @@ use Kicol\FullFlow\Events\SubscriptionPaymentReceived;
 use Kicol\FullFlow\Events\SubscriptionReactivated;
 use Kicol\FullFlow\Events\SubscriptionSuspended;
 use Kicol\FullFlow\Events\SubscriptionTrialStarted;
+use Kicol\FullFlow\Webhook\Handlers\PlanUpdatedHandler;
 use Kicol\FullFlow\Webhook\IdempotencyChecker;
 use Kicol\FullFlow\Webhook\SignatureValidator;
+use Kicol\FullFlow\Webhook\WebhookPayload;
 
 /**
  * Controller base para receber webhooks do FullFlow.
@@ -84,25 +86,78 @@ class FullFlowWebhookController extends Controller
             return response('Bad Request', 400);
         }
 
-        $eventId = (string) ($payload['evento_id'] ?? $request->header('X-Fullflow-Event-Id', ''));
-        $eventType = (string) ($payload['evento'] ?? '');
+        // Envelope dual PT/EN (CL-7, cutover 4.9) — campos obrigatórios
+        // continuam obrigatórios em qualquer formato.
+        $eventId = WebhookPayload::eventId($payload) ?: (string) $request->header('X-Fullflow-Event-Id', '');
+        $eventType = WebhookPayload::eventType($payload);
 
         if (!$eventId || !$eventType) {
             return response('Bad Request', 400);
         }
 
-        if ($idempotency->wasProcessed($eventId)) {
+        // Validação opt-in de product_code (sync 4.8 passo 3): com a config
+        // setada E o payload trazendo o campo, divergência = webhook de outro
+        // produto → 400. Eventos legados sem o campo passam (retrocompat).
+        $expectedProduct = (string) config('fullflow.product_code', '');
+        $incomingProduct = (string) ($payload['product_code'] ?? '');
+        if ($expectedProduct !== '' && $incomingProduct !== '' && $incomingProduct !== $expectedProduct) {
+            Log::warning('FullFlow webhook: product_code divergente — não é nosso webhook.', [
+                'expected' => $expectedProduct,
+                'incoming' => $incomingProduct,
+            ]);
+
+            return response('Bad Request', 400);
+        }
+
+        // Log de auditoria do cutover: a janela de observação da 4.9 exige
+        // provar que o formato PT zerou antes de remover o suporte legado.
+        Log::info('fullflow.webhook.received', [
+            'format' => WebhookPayload::format($payload),
+            'event_type' => $eventType,
+            'event_id' => $eventId,
+        ]);
+
+        // CLAIM com máquina de estados: o evento só vira 'processed' DEPOIS
+        // do side effect concluir. Duplicata de evento em processamento
+        // recebe 425 (o sender classifica como retry); claim de um worker
+        // que morreu (stale) é retomado — crash entre claim e processamento
+        // não vira perda silenciosa.
+        $claim = $idempotency->claim($eventId, $eventType);
+
+        if ($claim === IdempotencyChecker::DUPLICATE) {
             return response('OK (already processed)', 200);
         }
 
-        $eventClass = self::EVENT_MAP[$eventType] ?? null;
-        if ($eventClass !== null) {
-            event(new $eventClass($payload));
-        } else {
-            Log::info("FullFlow webhook: tipo de evento desconhecido ignorado: {$eventType}");
+        if ($claim === IdempotencyChecker::IN_FLIGHT) {
+            return response('Processing in flight', 425);
         }
 
-        $idempotency->markProcessed($eventId);
+        try {
+            if ($eventType === 'plan.updated') {
+                // Handler inline (não event Laravel): exception → 500 → outbox
+                // do FullFlow retenta; payload inválido → 400 (failed imediato
+                // + alerta no FullFlow, sem retry inútil).
+                if (! app(PlanUpdatedHandler::class)->handle($payload)) {
+                    $idempotency->release($eventId);
+
+                    return response('Unprocessable plan payload', 400);
+                }
+            } else {
+                $eventClass = self::EVENT_MAP[$eventType] ?? null;
+                if ($eventClass !== null) {
+                    event(new $eventClass($payload));
+                } else {
+                    Log::info("FullFlow webhook: tipo de evento desconhecido ignorado: {$eventType}");
+                }
+            }
+        } catch (\Throwable $e) {
+            // Falha conhecida: reabre imediatamente para a re-entrega.
+            $idempotency->release($eventId);
+
+            throw $e;
+        }
+
+        $idempotency->markProcessed($eventId, $eventType);
 
         return response('OK', 200);
     }

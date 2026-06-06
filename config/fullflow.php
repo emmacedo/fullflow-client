@@ -97,4 +97,33 @@ return [
     | automaticamente. Defina null/vazio para desabilitar.
     */
     'catalog_sync_at' => env('FULLFLOW_CATALOG_SYNC_AT', '03:00'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Reconciliacao semanal do espelho de planos (sync 4.10)
+    |--------------------------------------------------------------------------
+    | Rede de seguranca do webhook plan.updated. Roda aos sabados no horario
+    | configurado. NULL desliga. Na F9, o catalog_sync_at diario deve ser
+    | desligado (null) e este assume como pull de seguranca.
+    */
+    'catalog_reconcile_at' => env('FULLFLOW_RECONCILE_AT', '03:30'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Product code do SaaS no FullFlow (validacao de webhook, sync 4.8)
+    |--------------------------------------------------------------------------
+    | Quando setado, webhooks cujo payload traga product_code divergente sao
+    | rejeitados com 400 (nao e nosso webhook). Vazio = validacao desligada.
+    */
+    'product_code' => env('FULLFLOW_PRODUCT_CODE', ''),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Janela de stale do claim de idempotencia (minutos)
+    |--------------------------------------------------------------------------
+    | Evento em 'processing' ha mais que isso e considerado abandonado (o
+    | worker morreu entre claim e conclusao) — a proxima re-entrega reclaima.
+    | Duplicatas dentro da janela recebem 425 (retry com backoff no sender).
+    */
+    'idempotency_stale_minutes' => (int) env('FULLFLOW_IDEMPOTENCY_STALE_MINUTES', 10),
 ];

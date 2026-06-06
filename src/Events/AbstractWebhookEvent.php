@@ -3,6 +3,7 @@
 namespace Kicol\FullFlow\Events;
 
 use Illuminate\Foundation\Events\Dispatchable;
+use Kicol\FullFlow\Webhook\WebhookPayload;
 
 abstract class AbstractWebhookEvent
 {
@@ -12,19 +13,22 @@ abstract class AbstractWebhookEvent
     {
     }
 
+    // Accessors duais PT/EN (CL-7, cutover 4.9): listeners do SaaS continuam
+    // funcionando quando o FullFlow trocar o envelope para inglês.
+
     public function eventId(): string
     {
-        return $this->payload['evento_id'] ?? '';
+        return WebhookPayload::eventId($this->payload);
     }
 
     public function subscriptionId(): string
     {
-        return $this->payload['assinatura_id'] ?? '';
+        return WebhookPayload::subscriptionId($this->payload);
     }
 
     public function externalReference(): string
     {
-        return $this->payload['referencia_externa'] ?? '';
+        return WebhookPayload::externalReference($this->payload);
     }
 
     public function timestamp(): string
@@ -34,6 +38,6 @@ abstract class AbstractWebhookEvent
 
     public function data(): array
     {
-        return $this->payload['dados'] ?? [];
+        return WebhookPayload::data($this->payload);
     }
 }
