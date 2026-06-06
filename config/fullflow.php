@@ -58,6 +58,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Aliases de slug legado -> feature_key do catalogo novo
+    |--------------------------------------------------------------------------
+    | Janela de migracao: call sites antigos chamam getQuota() com o slug do
+    | modulo legado, mas o espelho fullflow_plan_features e indexado pela
+    | feature_key do catalogo declarativo. Mesmo mapa usado pelo FullFlow no
+    | bridge do webhook addon.confirmado. Array puro (config:cache-safe).
+    */
+    'feature_key_aliases' => [
+        'email_limit' => 'envio_email',
+        'purchaser_limit' => 'quantidade_compradores',
+        'whatsapp_unlimited' => 'envio_whatsapp',
+        'sms_limit' => 'envio_sms',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Catálogo de Módulos do App
     |--------------------------------------------------------------------------
     | Lista de módulos (features) que este SaaS oferece. Enviada ao FullFlow
