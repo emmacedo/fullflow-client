@@ -29,6 +29,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Exigir assinatura v2 (timestamp dentro do HMAC)
+    |--------------------------------------------------------------------------
+    | O FullFlow envia X-Fullflow-Signature-V2 ("t=<unix>,v1=<hmac(t.body)>")
+    | além do header v1 legado. Com true, webhooks sem o header v2 são
+    | rejeitados (401). Ligar somente quando o sender já emitir v2 — depois
+    | disso o v1 vira letra morta e pode ser removido do sender.
+    */
+    'webhook_require_v2' => (bool) env('FULLFLOW_WEBHOOK_REQUIRE_V2', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Reconciliação
     |--------------------------------------------------------------------------
     */

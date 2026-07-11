@@ -307,4 +307,72 @@ class WebhookReceiverTest extends TestCase
             'dados' => [],
         ])->assertOk();
     }
+
+    private function signedPostV2(array $payload, ?int $t = null, ?string $headerOverride = null, array $extraHeaders = [])
+    {
+        $body = json_encode($payload);
+        $t ??= time();
+        $header = $headerOverride ?? ('t=' . $t . ',v1=' . hash_hmac('sha256', $t . '.' . $body, self::SECRET));
+
+        return $this->call('POST', '/webhooks/fullflow', [], [], [], array_merge([
+            'HTTP_X-Fullflow-Signature-V2' => $header,
+            'CONTENT_TYPE' => 'application/json',
+        ], $extraHeaders), $body);
+    }
+
+    public function test_v2_signature_alone_is_accepted(): void
+    {
+        Event::fake([SubscriptionActivated::class]);
+
+        $this->signedPostV2([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba20',
+            'evento' => 'assinatura.ativada',
+            'dados' => [],
+        ])->assertOk();
+
+        Event::assertDispatchedTimes(SubscriptionActivated::class, 1);
+    }
+
+    public function test_invalid_v2_is_rejected_even_with_valid_v1_present(): void
+    {
+        // Sem fallback: se o sender emitiu v2 e ela não valida, cair para o
+        // esquema fraco abriria downgrade trivial.
+        $payload = [
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba21',
+            'evento' => 'assinatura.ativada',
+            'dados' => [],
+        ];
+        $body = json_encode($payload);
+
+        $this->signedPostV2($payload, null, 't=' . time() . ',v1=hmac-errado', [
+            'HTTP_X-Fullflow-Signature' => hash_hmac('sha256', $body, self::SECRET),
+        ])->assertStatus(401);
+    }
+
+    public function test_expired_v2_is_rejected(): void
+    {
+        $this->signedPostV2([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba22',
+            'evento' => 'assinatura.ativada',
+            'dados' => [],
+        ], time() - 3600)->assertStatus(401);
+    }
+
+    public function test_require_v2_rejects_v1_only_requests(): void
+    {
+        config(['fullflow.webhook_require_v2' => true]);
+
+        $this->signedPost([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba23',
+            'evento' => 'assinatura.ativada',
+            'dados' => [],
+        ])->assertStatus(401);
+
+        // Com v2 presente segue aceitando normalmente.
+        $this->signedPostV2([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba24',
+            'evento' => 'assinatura.ativada',
+            'dados' => [],
+        ])->assertOk();
+    }
 }

@@ -65,20 +65,39 @@ class FullFlowWebhookController extends Controller
             return response('Server misconfigured', 500);
         }
 
-        $signature = (string) $request->header('X-Fullflow-Signature', '');
-        if (!SignatureValidator::isValid($rawBody, $signature, $secret)) {
-            Log::warning('FullFlow webhook: assinatura inválida', ['ip' => $request->ip()]);
-            return response('Unauthorized', 401);
-        }
-
-        $timestamp = (string) $request->header('X-Fullflow-Timestamp', '');
         $tolerance = (int) config('fullflow.replay_protection_minutes', 5);
-        if ($timestamp && !SignatureValidator::isTimestampValid($timestamp, $tolerance)) {
-            Log::warning('FullFlow webhook: timestamp fora da janela', [
-                'timestamp' => $timestamp,
-                'tolerance_min' => $tolerance,
-            ]);
-            return response('Unauthorized', 401);
+        $signatureV2 = (string) $request->header('X-Fullflow-Signature-V2', '');
+
+        if ($signatureV2 !== '') {
+            // v2: timestamp DENTRO do HMAC — anti-replay verdadeiro. Se o
+            // header v2 veio e não valida, é 401 direto (sem fallback ao v1:
+            // cair para o esquema fraco abriria downgrade trivial).
+            if (!SignatureValidator::isValidV2($rawBody, $signatureV2, $secret, $tolerance)) {
+                Log::warning('FullFlow webhook: assinatura v2 inválida ou expirada', ['ip' => $request->ip()]);
+                return response('Unauthorized', 401);
+            }
+        } else {
+            if ((bool) config('fullflow.webhook_require_v2', false)) {
+                Log::warning('FullFlow webhook: assinatura v2 obrigatória e ausente', ['ip' => $request->ip()]);
+                return response('Unauthorized', 401);
+            }
+
+            // v1 (legado): HMAC só do body + timestamp em header não assinado.
+            // Mantido até todos os senders emitirem v2 e require_v2 ligar.
+            $signature = (string) $request->header('X-Fullflow-Signature', '');
+            if (!SignatureValidator::isValid($rawBody, $signature, $secret)) {
+                Log::warning('FullFlow webhook: assinatura inválida', ['ip' => $request->ip()]);
+                return response('Unauthorized', 401);
+            }
+
+            $timestamp = (string) $request->header('X-Fullflow-Timestamp', '');
+            if ($timestamp && !SignatureValidator::isTimestampValid($timestamp, $tolerance)) {
+                Log::warning('FullFlow webhook: timestamp fora da janela', [
+                    'timestamp' => $timestamp,
+                    'tolerance_min' => $tolerance,
+                ]);
+                return response('Unauthorized', 401);
+            }
         }
 
         $payload = json_decode($rawBody, true);

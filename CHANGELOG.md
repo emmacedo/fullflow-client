@@ -1,5 +1,29 @@
 # Changelog — kicol/fullflow-client
 
+## v0.9.0 — 2026-07-11
+
+### Assinatura v2 de webhooks — timestamp dentro do HMAC
+
+No esquema v1, o HMAC cobre só o body e o anti-replay valida o header
+`X-Fullflow-Timestamp`, que **não é assinado** — um webhook capturado
+poderia ser reenviado com timestamp novo. O v2 fecha isso:
+
+- `SignatureValidator::isValidV2()`: valida o header
+  `X-Fullflow-Signature-V2` no formato `t=<unix>,v1=<hmac>`, com
+  `hmac = HMAC-SHA256("<t>.<rawBody>", secret)`. O `t` assinado é validado
+  contra a janela `replay_protection_minutes` (default 5 min).
+- `FullFlowWebhookController`: quando o header v2 está presente, valida
+  **somente** o v2 (v2 inválida = 401 direto, sem fallback — evita
+  downgrade). Sem o header, segue o fluxo v1 legado inalterado.
+- Config nova `webhook_require_v2` (`FULLFLOW_WEBHOOK_REQUIRE_V2`, default
+  `false`): quando `true`, rejeita webhooks sem o header v2. Ligar somente
+  depois que o FullFlow sender estiver emitindo v2 (em produção desde
+  2026-07-11 — o sender emite v1 + v2 simultaneamente).
+
+Retrocompatível: nenhuma mudança de schema, nenhum comportamento alterado
+para quem não setar a config. Rollout sugerido: atualizar o pacote →
+observar `assinatura v2` nos logs → ligar `FULLFLOW_WEBHOOK_REQUIRE_V2`.
+
 ## v0.8.0 — 2026-06-05
 
 Versão do plano de migração KicolApps↔FullFlow (CL-1..CL-8). Projetada para
