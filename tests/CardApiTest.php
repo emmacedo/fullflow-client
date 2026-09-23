@@ -168,6 +168,15 @@ class CardApiTest extends TestCase
             && $req['consentimento']['versao'] === 'v1');
     }
 
+    public function test_purchase_addon_sends_return_url_when_given(): void
+    {
+        Http::fake(['*' => Http::response(['purchase_id' => 'p1', 'checkout' => ['client_secret' => 'cs']], 201)]);
+
+        $this->client()->purchaseAddon('ref-1', 'pacote_5k', 1, 'card', urlRetorno: 'https://saas.test/pacotes?pagamento=1');
+
+        Http::assertSent(fn (Request $req) => $req['url_retorno'] === 'https://saas.test/pacotes?pagamento=1');
+    }
+
     public function test_purchase_addon_legacy_call_sends_no_card_fields(): void
     {
         Http::fake(['*' => Http::response(['purchase_id' => 'p1'], 201)]);
@@ -176,6 +185,7 @@ class CardApiTest extends TestCase
 
         Http::assertSent(fn (Request $req) => $req['payment_method'] === 'pix'
             && ! array_key_exists('guardar_cartao', $req->data())
-            && ! array_key_exists('consentimento', $req->data()));
+            && ! array_key_exists('consentimento', $req->data())
+            && ! array_key_exists('url_retorno', $req->data()));
     }
 }
