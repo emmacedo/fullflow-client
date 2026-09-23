@@ -6,7 +6,9 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Kicol\FullFlow\Events\AddonRefunded;
 use Kicol\FullFlow\Events\SubscriptionActivated;
+use Kicol\FullFlow\Events\SubscriptionTrialExtended;
 use Kicol\FullFlow\FullFlowServiceProvider;
 use Kicol\FullFlow\Http\Controllers\FullFlowWebhookController;
 use Kicol\FullFlow\Models\FullFlowPlan;
@@ -374,5 +376,29 @@ class WebhookReceiverTest extends TestCase
             'evento' => 'assinatura.ativada',
             'dados' => [],
         ])->assertOk();
+    }
+
+    // ---- v0.10: eventos que antes eram ignorados em silêncio ----
+
+    public function test_trial_extended_and_addon_refunded_are_dispatched(): void
+    {
+        Event::fake([SubscriptionTrialExtended::class, AddonRefunded::class]);
+
+        $this->signedPost([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba10',
+            'evento' => 'assinatura.trial_estendido',
+            'referencia_externa' => 'kicol_store_5',
+            'dados' => ['trial_ate' => '2026-10-20', 'trial_ate_anterior' => '2026-10-10', 'dias_concedidos' => 10],
+        ])->assertOk();
+
+        $this->signedPost([
+            'evento_id' => '3f43cb5c-4eb3-46cb-9dc0-0b854e33ba11',
+            'evento' => 'addon.estornado',
+            'referencia_externa' => 'kicol_store_5',
+            'dados' => ['purchase_id' => 'p1', 'credits' => 5000],
+        ])->assertOk();
+
+        Event::assertDispatched(SubscriptionTrialExtended::class, fn ($e) => $e->data()['dias_concedidos'] === 10);
+        Event::assertDispatched(AddonRefunded::class, fn ($e) => $e->data()['credits'] === 5000);
     }
 }

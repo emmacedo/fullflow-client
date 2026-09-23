@@ -101,7 +101,54 @@ FullFlow::getSubscription($uuid);
 FullFlow::cancelSubscription($uuid, 'Cliente solicitou via chat');
 FullFlow::reactivateSubscription($uuid);
 FullFlow::listClientSubscriptions('12345678000100');
+FullFlow::setPlatform($uuid, 'tray');
 ```
+
+### Cartão de crédito (v0.10)
+
+O FullFlow devolve um **segredo de sessão**, não uma URL: o SaaS monta o
+formulário do provedor num modal (Stripe Embedded Checkout com a
+`chave_publicavel`) e o lojista não sai do sistema. Nenhum dado de cartão passa
+pelo SaaS. O resultado do pagamento chega pelos webhooks de assinatura.
+
+```php
+use Kicol\FullFlow\Exceptions\CardException;
+use Kicol\FullFlow\Exceptions\CardUnavailableException;
+use Kicol\FullFlow\Exceptions\LastCardException;
+
+$aceite = ['versao' => 'v1', 'ip' => $ipDoLojista, 'user_agent' => $request->userAgent()];
+
+try {
+    // Pagar a cobrança em aberto com cartão (o cartão fica salvo: débito automático)
+    $r = FullFlow::openCardCheckout($uuid, $aceite, route('assinatura', ['pagamento' => 1]));
+    // $r['checkout']['client_secret'], $r['checkout']['chave_publicavel'], $r['cartao_salvo']
+} catch (CardUnavailableException) {
+    // sem provedor de cartão no momento — manter boleto/Pix
+} catch (CardException $e) {
+    // $e->codigo: sem_cobranca_em_aberto | cobranca_nao_elegivel | assinatura_sem_plano_de_cobranca
+}
+
+FullFlow::listCards($uuid);                       // ['cartoes' => [...]] — o padrão primeiro
+FullFlow::openCardSetup($uuid, $aceite, $url);    // cadastrar sem cobrança (mesmo checkout)
+FullFlow::setDefaultCard($uuid, $cartaoId);
+
+try {
+    FullFlow::removeCard($uuid, $cartaoId);
+} catch (LastCardException) {
+    // último cartão de quem está em débito automático: perguntar e repetir com confirm
+    FullFlow::removeCard($uuid, $cartaoId, confirm: true);
+}
+
+// Pacote adicional no cartão salvo: sai pago na hora (sem `checkout` na resposta);
+// sem cartão salvo vem `checkout` para o formulário.
+FullFlow::purchaseAddon($ref, 'pacote_5k', 1, 'card');
+FullFlow::purchaseAddon($ref, 'pacote_5k', 1, 'card', guardarCartao: true, consentimento: $aceite);
+```
+
+O aceite é obrigatório sempre que o cartão pode ficar guardado. `ip` e
+`user_agent` são do **lojista** (o servidor do SaaS é quem chama o FullFlow, e
+registrar o endereço dele daria uma falsa prova). O texto do aviso é do SaaS;
+`versao` identifica qual texto foi mostrado.
 
 ## Receber webhooks
 
@@ -169,6 +216,12 @@ Eventos disponíveis:
 
 Cada um expõe `eventId()`, `subscriptionId()`, `externalReference()`, `timestamp()`, `data()`.
 
+Eventos disponíveis (`Kicol\FullFlow\Events\*`): `SubscriptionTrialStarted`,
+`SubscriptionActivated`, `SubscriptionPastDue`, `SubscriptionSuspended`,
+`SubscriptionReactivated`, `SubscriptionCancellationScheduled`,
+`SubscriptionEnded`, `SubscriptionPaymentReceived`, `SubscriptionTrialExtended`
+(v0.10), `AddonConfirmed`, `AddonRefunded` (v0.10) e `FullFlowPlanUpdated`.
+
 ## Bloquear acesso por status
 
 No model User:
@@ -214,6 +267,8 @@ $schedule->command('fullflow:reconcile')->everySixHours();
 
 Comportamento:
 - Assinaturas marcadas como `cancelada` localmente são puladas
+- Sincroniza status, teste, período, valor e — desde a v0.10 — `plan_code` e
+  `billing_cycle` (a troca de plano feita no FullFlow não tem webhook próprio)
 - Drift detectado é loggado como `warning` em `laravel.log`
 - 404 do FullFlow → log + skip
 - Erros de rede → log + segue
@@ -227,6 +282,9 @@ Todas estendem `Kicol\FullFlow\Exceptions\FullFlowException`:
 - `SubscriptionAlreadyExistsException` (409, ref duplicada)
 - `InvalidTransitionException` (409, transição inválida — ex: cancelar assinatura já cancelada)
 - `InvalidPayloadException` (400) — possui `$errors` com detalhes campo→erro
+- `CardException` (409/404 do módulo de cartão) — possui `$codigo`
+- `LastCardException` (409 `ultimo_cartao`) — repetir `removeCard` com `confirm: true`
+- `CardUnavailableException` (503 `cartao_indisponivel`)
 - `FullFlowException` (genérica)
 
 ## Schema local sugerido

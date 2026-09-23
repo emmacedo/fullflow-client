@@ -6,14 +6,25 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Kicol\FullFlow\Exceptions\ApiKeyException;
+use Kicol\FullFlow\Exceptions\CardException;
+use Kicol\FullFlow\Exceptions\CardUnavailableException;
 use Kicol\FullFlow\Exceptions\FullFlowException;
 use Kicol\FullFlow\Exceptions\InvalidPayloadException;
 use Kicol\FullFlow\Exceptions\InvalidTransitionException;
+use Kicol\FullFlow\Exceptions\LastCardException;
 use Kicol\FullFlow\Exceptions\SubscriptionAlreadyExistsException;
 use Kicol\FullFlow\Exceptions\SubscriptionNotFoundException;
 
 class FullFlowClient
 {
+    /** Códigos 409 do módulo de cartão (v0.10) que viram CardException. */
+    private const CARD_CODES = [
+        'assinatura_sem_plano_de_cobranca',
+        'sem_cobranca_em_aberto',
+        'cobranca_nao_elegivel',
+        'assinatura_sem_cliente',
+    ];
+
     public function __construct(
         public readonly string $baseUrl,
         protected readonly string $apiKey,
@@ -95,6 +106,88 @@ class FullFlowClient
     }
 
     /**
+     * Informa (ou limpa, com null) a plataforma da loja da assinatura
+     * (ex.: 'tray', 'nuvemshop'). Serve à segmentação no FullFlow.
+     */
+    public function setPlatform(string $uuid, ?string $plataforma): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/plataforma", ['plataforma' => $plataforma]);
+    }
+
+    // ------------------------------------------------------------------
+    // Cartão de crédito (v0.10)
+    // ------------------------------------------------------------------
+
+    /**
+     * Abre o formulário de cartão para a cobrança em aberto da assinatura.
+     *
+     * Devolve um segredo de sessão, não uma URL: o SaaS monta o formulário
+     * do provedor num modal e o lojista não sai do sistema. O resultado do
+     * pagamento chega pelos webhooks de assinatura, nunca por esta resposta.
+     * O cartão fica guardado para as próximas cobranças (débito automático) —
+     * por isso o aceite é obrigatório: `['versao' => 'v1', 'ip' => ..., 'user_agent' => ...]`,
+     * com o IP e o navegador do LOJISTA (não do servidor do SaaS).
+     *
+     * @return array {cobranca_id, valor, vencimento, checkout{client_secret, chave_publicavel}, cartao_salvo{descricao, validade}|null}
+     *
+     * @throws CardException             409 (sem cobrança em aberto, fora do motor, cobrança não elegível)
+     * @throws CardUnavailableException  503 (sem provedor de cartão)
+     */
+    public function openCardCheckout(string $uuid, array $consentimento, ?string $urlRetorno = null): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/checkout-cartao", array_filter([
+            'consentimento' => $consentimento,
+            'url_retorno' => $urlRetorno,
+        ], fn ($v) => $v !== null));
+    }
+
+    /**
+     * Cartões salvos do cliente da assinatura, o padrão primeiro.
+     *
+     * @return array {cartoes: [{id, descricao, bandeira, final, validade, vencido, padrao, ultimo_uso}]}
+     */
+    public function listCards(string $uuid): array
+    {
+        return $this->call('get', "/assinaturas/{$uuid}/cartoes");
+    }
+
+    /**
+     * Cadastra um cartão SEM cobrança (validação sem débito no provedor).
+     * Devolve `checkout{client_secret, chave_publicavel}` para o formulário;
+     * o cartão chega depois, pelo aviso do provedor — a tela consulta
+     * listCards() de novo.
+     *
+     * @throws CardException | CardUnavailableException
+     */
+    public function openCardSetup(string $uuid, array $consentimento, ?string $urlRetorno = null): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/cartoes", array_filter([
+            'consentimento' => $consentimento,
+            'url_retorno' => $urlRetorno,
+        ], fn ($v) => $v !== null));
+    }
+
+    /** Torna o cartão o padrão das próximas cobranças. @return array {cartao} */
+    public function setDefaultCard(string $uuid, string|int $cardId): array
+    {
+        return $this->call('post', "/assinaturas/{$uuid}/cartoes/{$cardId}/padrao");
+    }
+
+    /**
+     * Remove um cartão. O último cartão de quem está em débito automático é
+     * recusado com LastCardException; repetir com `$confirm = true` remove e
+     * as cobranças voltam a sair por boleto/Pix.
+     *
+     * @return array {removido: true}
+     *
+     * @throws LastCardException | CardException
+     */
+    public function removeCard(string $uuid, string|int $cardId, bool $confirm = false): array
+    {
+        return $this->call('delete', "/assinaturas/{$uuid}/cartoes/{$cardId}", $confirm ? ['confirmar' => true] : []);
+    }
+
+    /**
      * Lista cobranças de uma assinatura.
      *
      * @param string $status 'em_aberto' (default), 'pagas' ou 'todas'
@@ -166,17 +259,38 @@ class FullFlowClient
     /**
      * Inicia compra de add-on.
      *
-     * @param string $paymentMethod Hoje só 'pix' (default); valor inválido → 422.
-     * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, payment_method, pix}
+     * @param string $paymentMethod 'pix' (default) ou 'card'. Com cartão salvo, a
+     *        compra sai debitada na hora e a resposta vem SEM `checkout`; sem
+     *        cartão salvo, vem `checkout{client_secret, chave_publicavel}` para
+     *        o formulário embutido (v0.10).
+     * @param bool|null $guardarCartao no cartão novo, guardar para as próximas
+     *        compras (opcional; exige `$consentimento` com 'versao').
+     * @param array|null $consentimento ['versao' => 'v1', 'ip' => ..., 'user_agent' => ...]
+     * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, payment_method, pix?, checkout?}
      */
-    public function purchaseAddon(string $subscriptionCode, string $addonCode, int $quantity = 1, string $paymentMethod = 'pix'): array
-    {
-        return $this->call('post', '/addons/comprar', [
+    public function purchaseAddon(
+        string $subscriptionCode,
+        string $addonCode,
+        int $quantity = 1,
+        string $paymentMethod = 'pix',
+        ?bool $guardarCartao = null,
+        ?array $consentimento = null,
+    ): array {
+        $data = [
             'subscription_code' => $subscriptionCode,
             'addon_code' => $addonCode,
             'quantity' => $quantity,
             'payment_method' => $paymentMethod,
-        ]);
+        ];
+
+        if ($guardarCartao !== null) {
+            $data['guardar_cartao'] = $guardarCartao;
+        }
+        if ($consentimento !== null) {
+            $data['consentimento'] = $consentimento;
+        }
+
+        return $this->call('post', '/addons/comprar', $data);
     }
 
     /**
@@ -231,6 +345,9 @@ class FullFlowClient
                         'description' => $p['description'] ?? null,
                         'billing_cycle' => $p['billing_cycle'],
                         'amount' => $p['amount'],
+                        // Preço de tabela (v0.10): o "de" do "de/por" do plano
+                        // com desconto (anual). Nulo quando não há desconto.
+                        'list_amount' => $p['list_amount'] ?? null,
                         'is_custom_pricing' => $p['is_custom_pricing'] ?? false,
                         'visible_to_client' => $p['visible_to_client'] ?? true,
                         'trial_days' => $p['trial_days'] ?? 0,
@@ -340,11 +457,21 @@ class FullFlowClient
 
         match (true) {
             $response->status() === 401 => throw new ApiKeyException($mensagem),
+            // Cartão que não pertence ao cliente é 404 com código próprio —
+            // não é "assinatura não encontrada".
+            $response->status() === 404 && $codigo === 'cartao_nao_encontrado'
+                => throw new CardException($mensagem, $codigo),
             $response->status() === 404 => throw new SubscriptionNotFoundException($mensagem),
             $response->status() === 409 && $codigo === 'referencia_externa_duplicada'
                 => throw new SubscriptionAlreadyExistsException($mensagem),
             $response->status() === 409 && $codigo === 'transicao_invalida'
                 => throw new InvalidTransitionException($mensagem),
+            $response->status() === 409 && $codigo === 'ultimo_cartao'
+                => throw new LastCardException($mensagem, $codigo),
+            $response->status() === 409 && in_array($codigo, self::CARD_CODES, true)
+                => throw new CardException($mensagem, $codigo),
+            $response->status() === 503 && $codigo === 'cartao_indisponivel'
+                => throw new CardUnavailableException($mensagem, $codigo),
             $response->status() === 400 => throw new InvalidPayloadException($mensagem, $body['detalhes'] ?? []),
             // 422 = validação Laravel (FormRequest): errors é dict campo→mensagens.
             $response->status() === 422 => throw new InvalidPayloadException($mensagem, $body['errors'] ?? $body['detalhes'] ?? []),
