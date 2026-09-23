@@ -266,6 +266,10 @@ class FullFlowClient
      * @param bool|null $guardarCartao no cartão novo, guardar para as próximas
      *        compras (opcional; exige `$consentimento` com 'versao').
      * @param array|null $consentimento ['versao' => 'v1', 'ip' => ..., 'user_agent' => ...]
+     * @param string|null $urlRetorno para onde o formulário do provedor devolve o
+     *        lojista (v0.10.1). Obrigatório na prática para cartão novo: a sessão
+     *        embutida exige endereço de retorno, e sem ele o FullFlow responde
+     *        502 `erro_pagamento`.
      * @return array {purchase_id, addon_code, quantity, total_amount, credits_total, status, payment_method, pix?, checkout?}
      */
     public function purchaseAddon(
@@ -275,6 +279,7 @@ class FullFlowClient
         string $paymentMethod = 'pix',
         ?bool $guardarCartao = null,
         ?array $consentimento = null,
+        ?string $urlRetorno = null,
     ): array {
         $data = [
             'subscription_code' => $subscriptionCode,
@@ -288,6 +293,9 @@ class FullFlowClient
         }
         if ($consentimento !== null) {
             $data['consentimento'] = $consentimento;
+        }
+        if ($urlRetorno !== null) {
+            $data['url_retorno'] = $urlRetorno;
         }
 
         return $this->call('post', '/addons/comprar', $data);

@@ -1,5 +1,12 @@
 # Changelog — kicol/fullflow-client
 
+## v0.10.1 — 2026-09-23
+
+- `purchaseAddon(...)` ganha `$urlRetorno` (`url_retorno`): a sessão de cartão
+  embutida exige endereço de retorno, e sem ele o FullFlow não consegue abrir
+  o formulário para a compra com cartão novo. Chamadas antigas continuam
+  válidas.
+
 ## v0.10.0 — 2026-09-23
 
 ### Cartão de crédito, plataforma e pacote adicional no cartão
