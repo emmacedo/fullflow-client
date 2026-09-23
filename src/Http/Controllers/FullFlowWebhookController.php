@@ -8,6 +8,7 @@ use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Log;
 use Kicol\FullFlow\Events\AbstractWebhookEvent;
 use Kicol\FullFlow\Events\AddonConfirmed;
+use Kicol\FullFlow\Events\AddonRefunded;
 use Kicol\FullFlow\Events\SubscriptionActivated;
 use Kicol\FullFlow\Events\SubscriptionCancellationScheduled;
 use Kicol\FullFlow\Events\SubscriptionEnded;
@@ -15,6 +16,7 @@ use Kicol\FullFlow\Events\SubscriptionPastDue;
 use Kicol\FullFlow\Events\SubscriptionPaymentReceived;
 use Kicol\FullFlow\Events\SubscriptionReactivated;
 use Kicol\FullFlow\Events\SubscriptionSuspended;
+use Kicol\FullFlow\Events\SubscriptionTrialExtended;
 use Kicol\FullFlow\Events\SubscriptionTrialStarted;
 use Kicol\FullFlow\Webhook\Handlers\PlanUpdatedHandler;
 use Kicol\FullFlow\Webhook\IdempotencyChecker;
@@ -47,7 +49,9 @@ class FullFlowWebhookController extends Controller
         'assinatura.cancelamento_agendado' => SubscriptionCancellationScheduled::class,
         'assinatura.encerrada' => SubscriptionEnded::class,
         'assinatura.pagamento_recebido' => SubscriptionPaymentReceived::class,
+        'assinatura.trial_estendido' => SubscriptionTrialExtended::class,
         'addon.confirmado' => AddonConfirmed::class,
+        'addon.estornado' => AddonRefunded::class,
     ];
 
     public function __invoke(Request $request, IdempotencyChecker $idempotency): Response

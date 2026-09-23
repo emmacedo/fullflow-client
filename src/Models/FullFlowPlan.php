@@ -10,13 +10,14 @@ class FullFlowPlan extends Model
     protected $table = 'fullflow_plans';
 
     protected $fillable = [
-        'code', 'name', 'description', 'billing_cycle', 'amount',
+        'code', 'name', 'description', 'billing_cycle', 'amount', 'list_amount',
         'is_custom_pricing', 'visible_to_client', 'trial_days', 'sort_order',
         'plan_version', 'active', 'synced_at',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'list_amount' => 'decimal:2',
         'is_custom_pricing' => 'boolean',
         'visible_to_client' => 'boolean',
         'trial_days' => 'integer',

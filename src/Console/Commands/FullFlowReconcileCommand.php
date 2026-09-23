@@ -43,14 +43,20 @@ class FullFlowReconcileCommand extends Command
                     $drifts++;
                 }
 
-                $sub->update([
+                // Plano e periodicidade (v0.10): a troca de plano feita no
+                // FullFlow (painel, redução agendada aplicada na renovação)
+                // não gera webhook próprio — sem isto o espelho local ficava
+                // com o plano velho liberando módulos que o cliente não paga.
+                $sub->update(array_filter([
                     'status' => $remote['status'],
                     'trial_until' => $remote['trial_ate'] ?? null,
                     'current_period_start' => $remote['inicio_periodo_atual'] ?? null,
                     'current_period_end' => $remote['fim_periodo_atual'] ?? null,
                     'amount' => $remote['valor'] ?? $sub->amount,
+                    'plan_code' => $remote['plan_code'] ?? null,
+                    'billing_cycle' => $remote['periodicidade'] ?? null,
                     'last_synced_at' => now(),
-                ]);
+                ], fn ($v, $k) => ! in_array($k, ['plan_code', 'billing_cycle'], true) || $v !== null, ARRAY_FILTER_USE_BOTH));
 
                 $synced++;
             } catch (SubscriptionNotFoundException) {

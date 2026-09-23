@@ -161,6 +161,21 @@ class CatalogSyncV08Test extends TestCase
         $this->assertSame(50000, (int) $mirror[0]->quota);
     }
 
+    public function test_pull_persists_list_amount_and_clears_it_when_absent(): void
+    {
+        $comDesconto = $this->planosResponse();
+        $comDesconto['planos'][0]['list_amount'] = 118.80;
+        // Sequência: um stub por pull (dois fake() no mesmo teste não se substituem).
+        Http::fake(['*' => Http::sequence()->push($comDesconto, 200)->push($this->planosResponse(), 200)]);
+
+        app(\Kicol\FullFlow\FullFlowClient::class)->pullCatalog();
+        $this->assertEqualsWithDelta(118.80, (float) FullFlowPlan::where('code', 'pro')->value('list_amount'), 0.001);
+
+        // Desconto retirado no FullFlow: o "de" some do espelho também.
+        app(\Kicol\FullFlow\FullFlowClient::class)->pullCatalog();
+        $this->assertNull(FullFlowPlan::where('code', 'pro')->value('list_amount'));
+    }
+
     public function test_pull_marks_missing_plans_inactive_instead_of_deleting(): void
     {
         FullFlowPlan::create([

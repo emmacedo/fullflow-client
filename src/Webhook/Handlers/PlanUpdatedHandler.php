@@ -69,6 +69,7 @@ class PlanUpdatedHandler
                     'description' => $planData['description'] ?? null,
                     'billing_cycle' => $planData['billing_cycle'] ?? 'mensal',
                     'amount' => $planData['amount'] ?? 0,
+                    'list_amount' => $planData['list_amount'] ?? null,
                     'is_custom_pricing' => $planData['is_custom_pricing'] ?? false,
                     'visible_to_client' => $planData['visible_to_client'] ?? true,
                     'trial_days' => $planData['trial_days'] ?? 0,

@@ -1,5 +1,40 @@
 # Changelog — kicol/fullflow-client
 
+## v0.10.0 — 2026-09-23
+
+### Cartão de crédito, plataforma e pacote adicional no cartão
+
+O FullFlow passou a aceitar cartão nas assinaturas de SaaS (formulário do
+provedor embutido no SaaS, cartão salvo com débito automático, régua de
+recusa). Esta versão expõe isso no cliente — até aqui cada SaaS chamava a
+API direto.
+
+- `openCardCheckout($uuid, $consentimento, $urlRetorno)`: abre o formulário
+  de cartão para a cobrança em aberto. Devolve `checkout{client_secret,
+  chave_publicavel}`; o resultado do pagamento chega pelos webhooks.
+- `listCards`, `openCardSetup` (cadastro sem cobrança), `setDefaultCard`,
+  `removeCard($uuid, $id, $confirm)`.
+- `setPlatform($uuid, $plataforma)`: plataforma da loja.
+- `purchaseAddon(...)` ganha `$guardarCartao` e `$consentimento`; com
+  `payment_method = 'card'` e cartão salvo a compra sai paga na hora (sem
+  `checkout` na resposta).
+- Exceções novas: `CardException` (com `$codigo`), `LastCardException`
+  (409 `ultimo_cartao` — repetir com `$confirm = true`) e
+  `CardUnavailableException` (503).
+- Eventos novos no receptor: `SubscriptionTrialExtended`
+  (`assinatura.trial_estendido`) e `AddonRefunded` (`addon.estornado`).
+  Antes eram ignorados em silêncio.
+- `fullflow:reconcile` passa a gravar `plan_code` e `billing_cycle`
+  quando a API os devolve: a troca de plano feita no FullFlow (painel ou
+  redução agendada) não tem webhook próprio, e o espelho ficava com o
+  plano antigo.
+- Catálogo: `fullflow_plans.list_amount` (preço de tabela, migration
+  condicional) gravado na replicação e no `plan.updated`. É o "de" do
+  "de/por" do plano anual.
+
+Retrocompatível: nenhuma assinatura de método muda; as chamadas antigas de
+`purchaseAddon` continuam válidas.
+
 ## v0.9.0 — 2026-07-11
 
 ### Assinatura v2 de webhooks — timestamp dentro do HMAC
